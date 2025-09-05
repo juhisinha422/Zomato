@@ -1,75 +1,88 @@
-pipeline{
+pipeline {
     agent any
-    tools{
+    tools {
         jdk 'jdk17'
-        nodejs 'node16'
+        nodejs 'node18'
     }
     environment {
-        SCANNER_HOME=tool 'sonar-scanner'
+        SCANNER_HOME = tool 'sonar-scanner'
     }
     stages {
-        stage('clean workspace'){
-            steps{
+        stage('Clean Workspace') {
+            steps {
                 cleanWs()
             }
         }
-        stage('Checkout from Git'){
-            steps{
-                git branch: 'main', url: 'https://github.com/vijaygiduthuri/Zomato.git'
+
+        stage('Checkout from Git') {
+            steps {
+                git branch: 'main', url: 'https://github.com/juhisinha422/Zomato.git'
             }
         }
-        stage("Sonarqube Analysis "){
-            steps{
+
+        stage('SonarQube Analysis') {
+            steps {
                 withSonarQubeEnv('sonar-server') {
-                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=zomato \
-                    -Dsonar.projectKey=zomato '''
+                    sh '''
+                        $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectName=zomato \
+                        -Dsonar.projectKey=zomato
+                    '''
                 }
             }
         }
-        stage("quality gate"){
-           steps {
+
+        stage('Quality Gate') {
+            steps {
                 script {
-                    waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token' 
+                    waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token'
                 }
-            } 
+            }
         }
+
         stage('Install Dependencies') {
             steps {
                 sh "npm install"
             }
         }
-        stage('OWASP FS SCAN') {
+
+        stage('Trivy Dependency Scan') {
             steps {
-                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
-                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+                sh "trivy fs --scanners vuln . > trivy-deps.txt"
             }
         }
-        stage('TRIVY FS SCAN') {
+
+        stage('Trivy FS Scan') {
             steps {
                 sh "trivy fs . > trivyfs.txt"
             }
         }
-        stage("Docker Build & Push"){
-            steps{
-                script{
-                   withDockerRegistry(credentialsId: 'docker', toolName: 'docker'){   
-                       sh "docker build -t zomato ."
-                       sh "docker tag zomato vijaygiduthuri/zomato:latest "
-                       sh "docker push vijaygiduthuri/zomato:latest "
+
+        stage('Docker Build & Push') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
+                        sh "docker build -t zomato ."
+                        sh "docker tag zomato juhisinha/zomato:latest"
+                        sh "docker push juhisinha/zomato:latest"
                     }
                 }
             }
         }
-        stage("TRIVY"){
-            steps{
-                sh "trivy image vijaygiduthuri/zomato:latest > trivy.txt" 
+
+        stage('Trivy Image Scan') {
+            steps {
+                sh "trivy image juhisinha/zomato:latest > trivy.txt"
             }
         }
-        stage('Deploy to container'){
-            steps{
-                sh 'docker run -d --name zomato -p 3000:3000 vijaygiduthuri/zomato:latest'
+
+        stage('Deploy to Container') {
+            steps {
+                sh '''
+                    docker rm -f zomato || true
+                    docker run -d --name zomato -p 3000:3000 juhisinha/zomato:latest
+                '''
             }
         }
     }
 }
-
