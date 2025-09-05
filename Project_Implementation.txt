@@ -1,0 +1,198 @@
+https://www.youtube.com/watch?v=m41Z9qOwGTw
+
+Go to AWS -> IAM -> Create user -> Create Access key & Secret key
+
+Install AWS CLI: -
+
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+sudo apt install -y unzip
+unzip awscliv2.zip
+sudo ./aws/install
+aws --version
+
+
+aws configure
+give acces key and secret key
+region: ap-south-1
+
+git clone https://github.com/juhisinha422/Terraform-EC2.git
+cd Terraform-EC2
+
+-> Go AWS -> EC2 -> Key Pairs -> Create Key Pair (mumbai) 
+
+
+Install Terraform
+
+wget -O - https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(grep -oP '(?<=UBUNTU_CODENAME=).*' /etc/os-release || lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+sudo apt update && sudo apt install terraform
+
+
+terraform init
+
+terraform plan
+terraform apply --auto-approve
+
+
+-> In EC2 we can see Jenkins-sonar Instance got created.
+-> Connect to jenkins-sonar (PublicIP:8080)
+
+-> Login to SonarQube also
+-> Jenkins-sonarPublicIP:9000
+-> reset password
+
+
+-> Get password and connect to jenkins-sonar EC2 instance
+sudo apt update -y
+sudo su 
+sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+Login to Jenkins
+create username and password and login
+
+
+-> Go to Manage Jenkins -> Plugins -> Eclipse Temurin installer, SonarQube Scanner, NodeJS, OWASP Dependency-Check, Docker, Docker Commons, Docker Pipeline, Docker API, docker-build-step
+-> Click on install
+
+-> Go to Manage Jenkins -> Tools -> JDK Installations -> ADD JDK -> name: jdk17 -> Install automatically ->add installer : Install from adoptium.net -> version: 17.0.8.1+1
+
+
+SonarQube Scanner installations -> Add SonarQube Scanner -> name: sonar-scanner
+
+NodeJS Installations -> Add NodeJS -> name: node18 -> version: 18.2.0
+
+Dependency Check Installations -> Add dependency check -> name: DP-Check -> Install automatically -> Install from GitHub.com -> version: 6.5.1
+
+
+Docker Installations -> add docker -> name: docker -> install automatically -> install from docker.com
+
+apply and save
+
+-> Integrate sonar to Jenkins
+
+-> Go to sonar -> administration -> security -> users -> tokens -> name: Jenkins -> Generate (copy)
+
+-> Go to Jenkins -> Credentials -> global -> add credentials -> kind: secret text -> Paste token (secret) ->ID and Description: Sonar-token -> create
+
+-> Go to SonarQube -> Configuration -> webhooks -> create -> name: jenkins -> URL: give Jenkins URL (http://13.232.195.126:8080/sonarqube-webhook/) -> create
+
+-> Integrate SonarQube with Jenkins 
+-> Go to manage Jenkins -> system -> SonarQube Servers -> SonarQube Installations -> name: sonar-server -> Server URL: SonarQube IP (http://13.232.195.126:9000) -> Sonar authentication token (sonar token) ->apply and save
+
+
+-> Docker hub credentials to Jenkins
+-> Go to manage Jenkins -> credentials -> global -> add credentials -> Kind: username and password -> give username and password of Docker hub -> ID and Desc: docker -> create
+
+-> go to Jenkins dashboard -> New Item -> Name: Zomato -> Pipeline -> OK -> Discard Old builds -> Max # of builds to keep: 3 -> script
+
+pipeline {
+    agent any
+    tools {
+        jdk 'jdk17'
+        nodejs 'node18'
+    }
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+    }
+    stages {
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+
+        stage('Checkout from Git') {
+            steps {
+                git branch: 'main', url: 'https://github.com/juhisinha422/Zomato.git'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh '''
+                        $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectName=zomato \
+                        -Dsonar.projectKey=zomato
+                    '''
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token'
+                }
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                sh "npm install"
+            }
+        }
+
+        stage('Trivy Dependency Scan') {
+            steps {
+                sh "trivy fs --scanners vuln . > trivy-deps.txt"
+            }
+        }
+
+        stage('Trivy FS Scan') {
+            steps {
+                sh "trivy fs . > trivyfs.txt"
+            }
+        }
+
+        stage('Docker Build & Push') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
+                        sh "docker build -t zomato ."
+                        sh "docker tag zomato juhisinha/zomato:latest"
+                        sh "docker push juhisinha/zomato:latest"
+                    }
+                }
+            }
+        }
+
+        stage('Trivy Image Scan') {
+            steps {
+                sh "trivy image juhisinha/zomato:latest > trivy.txt"
+            }
+        }
+
+        stage('Deploy to Container') {
+            steps {
+                sh '''
+                    docker rm -f zomato || true
+                    docker run -d --name zomato -p 3000:3000 juhisinha/zomato:latest
+                '''
+            }
+        }
+    }
+}
+
+-> apply and save and build now
+
+
+Optional: To check pipeline syntax -> sample step : tool:Use a tool from a predefined Tool Installation -> Tool Type: JDK -> Tool:jdk17-> Generate Pipeline Script
+
+For git -> sample step: git:Git -> Git URL: https://github.com/juhisinha422/Zomato.git -> branch: main -> generate pipeline script
+
+-=======
+
+-> Go to SonarQube -> Projects and see the bugs,etc -> Lines we can see it scanned nearly 1.3k lines
+-> Check issues 
+
+-> Access site: Jenkins-sonarPublicIP:3000
+
+
+
+
+
+
+
+
+
+
